@@ -76,7 +76,8 @@ export const RecordingControls: React.FC = () => {
         fps: 30,
         show_cursor: true,
         show_highlight: true,
-        save_frames: true
+        save_frames: true,
+        capture_keystrokes: true
       };
       
       await recordingService.startRecording(options);

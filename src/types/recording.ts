@@ -3,6 +3,7 @@ export interface RecordingOptions {
     show_cursor: boolean;
     show_highlight: boolean;
     save_frames: boolean;
+    capture_keystrokes: boolean;
 }
 
 export interface RecordingState {

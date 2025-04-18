@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Instant, Duration};
 use std::path::PathBuf;
 use std::fs::{File, create_dir_all};
-use std::io::Write;
+use std::io::{Write, Read, Seek};
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Local;
@@ -17,6 +17,7 @@ use scap::{
     frame::Frame,
 };
 use std::process::Command;
+use rdev;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingOptions {
@@ -24,6 +25,7 @@ pub struct RecordingOptions {
     pub show_cursor: bool,
     pub show_highlight: bool,
     pub save_frames: bool,
+    pub capture_keystrokes: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -38,6 +40,7 @@ struct RecordingStateWrapper {
     start_time: Mutex<Option<Instant>>,
     is_recording: Arc<AtomicBool>,
     output_dir: Arc<Mutex<Option<PathBuf>>>,
+    keystrokes: Arc<Mutex<Vec<(String, Instant)>>>,
 }
 
 #[tauri::command]
@@ -69,19 +72,18 @@ fn start_recording(
         println!("Permission already granted.");
     }
 
-    // Create output directory if saving frames
-    if options.save_frames {
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let recordings_dir = PathBuf::from(home_dir).join("recordings");
-        create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
+    // Create output directory for events and frames if needed
+    let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let recordings_dir = PathBuf::from(home_dir).join("recordings");
+    create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
 
-        let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-        let session_dir = recordings_dir.join(timestamp);
-        create_dir_all(&session_dir).expect("Failed to create session directory");
-        println!("Created output directory: {:?}", session_dir);
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let session_dir = recordings_dir.join(timestamp);
+    create_dir_all(&session_dir).expect("Failed to create session directory");
+    println!("Created output directory: {:?}", session_dir);
 
-        *state.output_dir.lock().unwrap() = Some(session_dir);
-    }
+    // Always set the output directory for events
+    *state.output_dir.lock().unwrap() = Some(session_dir.clone());
 
     // Create scap options
     let scap_options = Options {
@@ -119,6 +121,12 @@ fn start_recording(
     state.is_recording.store(true, Ordering::SeqCst);
     *state.start_time.lock().unwrap() = Some(Instant::now());
     println!("Recording state set to recording.");
+
+    // Clear previous keystrokes if any
+    if options.capture_keystrokes {
+        println!("Clearing previous keystrokes...");
+        *state.keystrokes.lock().unwrap() = Vec::new();
+    }
 
     // Start frame saving thread if needed
     if options.save_frames {
@@ -221,6 +229,118 @@ fn start_recording(
         });
     }
 
+    // Start keystroke capture thread if needed
+    if options.capture_keystrokes {
+        println!("Starting event capture thread...");
+        let is_recording = state.is_recording.clone();
+        let keystrokes = state.keystrokes.clone();
+        let start_time = *state.start_time.lock().unwrap();
+        let output_dir = state.output_dir.clone();
+
+        thread::spawn(move || {
+            println!("Event capture thread started");
+            
+            // Create a temporary file for events
+            let events_file = if let Some(dir) = output_dir.lock().unwrap().as_ref() {
+                dir.join("events_temp.txt")
+            } else {
+                println!("No output directory found for events");
+                return;
+            };
+            
+            // Start a separate process for event capture
+            let mut child = match std::process::Command::new("cargo")
+                .args([
+                    "run",
+                    "--example",
+                    "event_capture",
+                    "--",
+                    events_file.to_str().unwrap(),
+                ])
+                .spawn() {
+                    Ok(child) => child,
+                    Err(e) => {
+                        eprintln!("Failed to start event capture process: {}", e);
+                        return;
+                    }
+                };
+            
+            println!("Event capture process started with PID: {}", child.id());
+            
+            // Monitor the events file and add events to our keystrokes list
+            let mut last_read_position = 0;
+            
+            while is_recording.load(Ordering::SeqCst) {
+                // Check if the events file exists
+                if !events_file.exists() {
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                
+                // Read new events from the file
+                match std::fs::File::open(&events_file) {
+                    Ok(mut file) => {
+                        let metadata = match file.metadata() {
+                            Ok(metadata) => metadata,
+                            Err(e) => {
+                                eprintln!("Failed to get file metadata: {}", e);
+                                thread::sleep(Duration::from_millis(100));
+                                continue;
+                            }
+                        };
+                        
+                        let file_size = metadata.len() as usize;
+                        
+                        // If the file has grown, read the new content
+                        if file_size > last_read_position {
+                            // Seek to the last read position
+                            if let Err(e) = file.seek(std::io::SeekFrom::Start(last_read_position as u64)) {
+                                eprintln!("Failed to seek in file: {}", e);
+                                thread::sleep(Duration::from_millis(100));
+                                continue;
+                            }
+                            
+                            // Read the new content
+                            let mut buffer = vec![0; file_size - last_read_position];
+                            match file.read(&mut buffer) {
+                                Ok(bytes_read) => {
+                                    if bytes_read > 0 {
+                                        // Parse the events and add them to our keystrokes list
+                                        let content = String::from_utf8_lossy(&buffer[..bytes_read]);
+                                        for line in content.lines() {
+                                            let timestamp = Instant::now();
+                                            if let Ok(mut keystrokes) = keystrokes.lock() {
+                                                keystrokes.push((line.to_string(), timestamp));
+                                            }
+                                        }
+                                        
+                                        // Update the last read position
+                                        last_read_position += bytes_read;
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("Failed to read from file: {}", e);
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to open events file: {}", e);
+                    }
+                }
+                
+                thread::sleep(Duration::from_millis(50));
+            }
+            
+            // Kill the event capture process
+            if let Err(e) = child.kill() {
+                eprintln!("Failed to kill event capture process: {}", e);
+            }
+            
+            println!("Event capture thread stopped");
+        });
+    }
+
     println!("Recording started successfully.");
     Ok(())
 }
@@ -243,7 +363,30 @@ fn stop_recording(state: State<RecordingStateWrapper>) -> Result<String, String>
         if let Some(dir) = state.output_dir.lock().unwrap().as_ref() {
             println!("Output directory found: {:?}", dir);
             
-            // Try to compile frames to video
+            // Save events to a file if any were captured
+            let keystrokes = state.keystrokes.lock().unwrap();
+            if !keystrokes.is_empty() {
+                println!("Saving {} events to file...", keystrokes.len());
+                let events_file = dir.join("events.txt");
+                
+                match File::create(&events_file) {
+                    Ok(mut file) => {
+                        for (event, timestamp) in keystrokes.iter() {
+                            if let Err(e) = writeln!(file, "{}: {:?}", event, timestamp) {
+                                eprintln!("Failed to write event to file: {}", e);
+                            }
+                        }
+                        println!("Events saved to: {:?}", events_file);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to create events file: {}", e);
+                    }
+                }
+            } else {
+                println!("No events to save.");
+            }
+            
+            // Try to compile frames to video if frames were saved
             let output_video = dir.join("output.mp4");
             println!("Attempting to compile video to: {:?}", output_video);
             
@@ -314,26 +457,64 @@ fn compile_frames_to_video(frames_dir: &PathBuf, output_video: &PathBuf, frame_r
     
     println!("ffmpeg is available, starting compilation...");
     
-    // Run ffmpeg to compile frames to video
-    // Note: We're assuming BGRA format (32-bit per pixel)
+    // Try a different approach with ffmpeg
+    // First, let's try to convert the raw frames to PNG files
+    println!("Converting raw frames to PNG format...");
+    
+    // Create a temporary directory for PNG files
+    let temp_dir = frames_dir.join("temp_png");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    
+    // Convert each raw frame to PNG
+    for i in 0..frame_count {
+        let raw_path = frames_dir.join(format!("frame_{:06}.raw", i));
+        let png_path = temp_dir.join(format!("frame_{:06}.png", i));
+        
+        // Use ffmpeg to convert raw to PNG
+        let convert_status = Command::new("ffmpeg")
+            .args([
+                "-f", "rawvideo",
+                "-pix_fmt", "bgra",
+                "-s", "1280x720",
+                "-i", raw_path.to_str().ok_or("Invalid raw path")?,
+                "-frames:v", "1",
+                png_path.to_str().ok_or("Invalid PNG path")?,
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        
+        if !convert_status.status.success() {
+            let error_output = String::from_utf8_lossy(&convert_status.stderr);
+            println!("Warning: Failed to convert frame {} to PNG: {}", i, error_output);
+        }
+    }
+    
+    // Now compile the PNG files to video
+    println!("Compiling PNG frames to video...");
+    let png_pattern = temp_dir.join("frame_%06d.png");
+    
     let status = Command::new("ffmpeg")
         .args([
             "-framerate", &frame_rate.to_string(),
-            "-i", input_pattern.to_str().ok_or("Invalid input pattern path")?,
-            "-f", "rawvideo",
-            "-pix_fmt", "bgra",
-            "-s", "1280x720", // Assuming 720p resolution
+            "-i", png_pattern.to_str().ok_or("Invalid PNG pattern path")?,
             "-c:v", "libx264",
-            "-preset", "medium", // Add a preset for better encoding
-            "-crf", "23", // Add a quality setting
+            "-preset", "medium",
+            "-crf", "23",
             "-pix_fmt", "yuv420p",
             output_video.to_str().ok_or("Invalid output path")?,
         ])
-        .status()
+        .output()
         .map_err(|e| e.to_string())?;
     
-    if !status.success() {
-        return Err("Failed to compile video with ffmpeg.".to_string());
+    // Clean up temporary directory
+    if let Err(e) = std::fs::remove_dir_all(&temp_dir) {
+        println!("Warning: Failed to clean up temporary directory: {}", e);
+    }
+    
+    if !status.status.success() {
+        let error_output = String::from_utf8_lossy(&status.stderr);
+        println!("ffmpeg error output: {}", error_output);
+        return Err(format!("Failed to compile video with ffmpeg: {}", error_output));
     }
     
     println!("Video compilation completed successfully");
@@ -371,6 +552,7 @@ pub fn run() {
             start_time: Mutex::new(None),
             is_recording: Arc::new(AtomicBool::new(false)),
             output_dir: Arc::new(Mutex::new(None)),
+            keystrokes: Arc::new(Mutex::new(Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
             start_recording,

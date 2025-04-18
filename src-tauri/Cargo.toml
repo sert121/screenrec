@@ -27,3 +27,5 @@ scap = "0.0.8"
 tokio = { version = "1.32.0", features = ["full"] }
 rdev = { version = "0.5.3", features = ["unstable_grab"] }
 chrono = "0.4"
+image = "0.24"
+crossbeam-channel = "0.5"

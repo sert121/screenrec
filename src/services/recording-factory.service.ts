@@ -12,7 +12,7 @@ export class RecordingFactory {
     const service = {
       startRecording: async (options: RecordingOptions) => {
         console.log('Starting recording with options:', options);
-        await invoke('start_recording', { options });
+        await invoke('start_recording', { opts: options });
         console.log('Recording started successfully');
       },
       

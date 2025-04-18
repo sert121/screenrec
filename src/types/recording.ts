@@ -9,7 +9,6 @@ export interface RecordingOptions {
 export interface RecordingState {
     is_recording: boolean;
     duration: number;
-    output_path?: string;
     error?: string;
 }
 

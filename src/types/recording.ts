@@ -1,16 +1,14 @@
 export interface RecordingOptions {
     fps: number;
-    output_path: string;
-    audio: boolean;
-    video: boolean;
-    frame_rate: number;
-    quality: string;
+    show_cursor: boolean;
+    show_highlight: boolean;
+    save_frames: boolean;
 }
 
 export interface RecordingState {
-    isRecording: boolean;
+    is_recording: boolean;
     duration: number;
-    outputPath?: string;
+    output_path?: string;
     error?: string;
 }
 

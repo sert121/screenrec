@@ -19,10 +19,10 @@ export const RecordingControls: React.FC = () => {
         
         // Get initial state
         const state = await service.getState();
-        setIsRecording(state.isRecording);
+        setIsRecording(state.is_recording);
         setDuration(state.duration);
-        if (state.outputPath) {
-          setRecordingPath(state.outputPath);
+        if (state.output_path) {
+          setRecordingPath(state.output_path);
         }
       } catch (err) {
         console.error('Failed to initialize recording service:', err);
@@ -31,6 +31,28 @@ export const RecordingControls: React.FC = () => {
     };
 
     initRecordingService();
+    
+    // Add visibility change handler to check recording state when tab becomes visible again
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && recordingService) {
+        try {
+          const state = await recordingService.getState();
+          setIsRecording(state.is_recording);
+          setDuration(state.duration);
+          if (state.output_path) {
+            setRecordingPath(state.output_path);
+          }
+        } catch (err) {
+          console.error('Failed to get recording state after tab switch:', err);
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -50,14 +72,11 @@ export const RecordingControls: React.FC = () => {
   const handleStartRecording = async () => {
     try {
       setError(null);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const options: RecordingOptions = {
         fps: 30,
-        audio: true,
-        video: true,
-        frame_rate: 30,
-        quality: 'high',
-        output_path: `recording-${timestamp}`
+        show_cursor: true,
+        show_highlight: true,
+        save_frames: true
       };
       
       await recordingService.startRecording(options);
@@ -79,6 +98,14 @@ export const RecordingControls: React.FC = () => {
       const path = await recordingService.stopRecording();
       setIsRecording(false);
       setRecordingPath(path);
+      
+      // Clear recording state after saving
+      setDuration(0);
+      
+      // Reset recording service to get a fresh state
+      const platform = await invoke('get_platform');
+      const newService = RecordingFactory.createRecordingService(platform as string);
+      setRecordingService(newService);
     } catch (err) {
       console.error('Failed to stop recording:', err);
       setError(err instanceof Error ? err.message : 'Failed to stop recording');
@@ -89,7 +116,7 @@ export const RecordingControls: React.FC = () => {
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')``}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (!recordingService) {

@@ -1,5 +1,5 @@
 import { RecordingOptions, RecordingState, RecordingService } from '../types/recording';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 
 export abstract class BaseRecordingService implements RecordingService {
   protected state: RecordingState = {
@@ -12,7 +12,7 @@ export abstract class BaseRecordingService implements RecordingService {
     this.stopDurationTimer = this.stopDurationTimer.bind(this);
   }
 
-  protected durationTimer: NodeJS.Timer | null = null;
+  protected durationTimer: NodeJS.Timeout | null = null;
 
   protected startDurationTimer(): void {
     if (!this.durationTimer) {

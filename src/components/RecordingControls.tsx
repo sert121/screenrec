@@ -1,173 +1,114 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { RecordingOptions, RecordingState } from '../types/recording';
+import React, { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { RecordingFactory } from '../services/recording-factory.service';
-
-const defaultOptions: RecordingOptions = {
-  audio: true,
-  video: true,
-  frameRate: 30,
-  quality: 'high',
-};
+import { RecordingOptions, RecordingState } from '../types/recording';
 
 export const RecordingControls: React.FC = () => {
-  const [recordingState, setRecordingState] = useState<RecordingState>({
-    isRecording: false,
-    duration: 0,
-  });
-  const [options, setOptions] = useState<RecordingOptions>(defaultOptions);
+  const [isRecording, setIsRecording] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [recordingPath, setRecordingPath] = useState<string | null>(null);
   const [recordingService, setRecordingService] = useState<any>(null);
-  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const initService = async () => {
+    const initRecordingService = async () => {
       try {
-        console.log('Initializing recording service...');
-        
-        // Use a hardcoded platform value for testing
-        const platform = 'macos'; // or 'windows' or 'linux' depending on your OS
-        console.log('Using hardcoded platform:', platform);
-        
-        const service = RecordingFactory.createRecordingService(platform);
-        console.log('Recording service created:', service);
+        const platform = await invoke('get_platform');
+        const service = RecordingFactory.createRecordingService(platform as string);
         setRecordingService(service);
-      } catch (error) {
-        console.error('Failed to initialize recording service:', error);
-        setRecordingState(prev => ({
-          ...prev,
-          error: `Failed to initialize: ${String(error)}`
-        }));
+        
+        // Get initial state
+        const state = await service.getState();
+        setIsRecording(state.isRecording);
+        setDuration(state.duration);
+        if (state.outputPath) {
+          setRecordingPath(state.outputPath);
+        }
+      } catch (err) {
+        console.error('Failed to initialize recording service:', err);
+        setError('Failed to initialize recording service');
       }
     };
-    
-    initService();
-    
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-    };
+
+    initRecordingService();
   }, []);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isRecording) {
+      timer = setInterval(() => {
+        setDuration(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [isRecording]);
 
   const handleStartRecording = async () => {
     try {
-      if (!recordingService) {
-        console.error('Recording service not initialized');
-        return;
-      }
+      setError(null);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const options: RecordingOptions = {
+        fps: 30,
+        audio: true,
+        video: true,
+        frame_rate: 30,
+        quality: 'high',
+        output_path: `recording-${timestamp}`
+      };
       
       await recordingService.startRecording(options);
-      
-      // Update recording state
-      setRecordingState({
-        isRecording: true,
-        duration: 0,
-      });
-      
-      // Start timer
-      timerRef.current = window.setInterval(() => {
-        setRecordingState(prev => ({
-          ...prev,
-          duration: prev.duration + 1
-        }));
-      }, 1000);
-      
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      setRecordingState(prev => ({
-        ...prev,
-        error: String(error)
-      }));
+      setIsRecording(true);
+      setDuration(0);
+      setRecordingPath(null);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      setError(err instanceof Error ? err.message : 'Failed to start recording');
     }
   };
 
   const handleStopRecording = async () => {
     try {
+      setError(null);
       if (!recordingService) {
-        console.error('Recording service not initialized');
-        return;
+        throw new Error('Recording service not initialized');
       }
-      
-      // Clear timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      
-      const filePath = await recordingService.stopRecording();
-      
-      // Update recording state
-      setRecordingState({
-        isRecording: false,
-        duration: 0,
-      });
-      
-      console.log('Recording saved to:', filePath);
-    } catch (error) {
-      console.error('Failed to stop recording:', error);
-      setRecordingState(prev => ({
-        ...prev,
-        error: String(error)
-      }));
+      const path = await recordingService.stopRecording();
+      setIsRecording(false);
+      setRecordingPath(path);
+    } catch (err) {
+      console.error('Failed to stop recording:', err);
+      setError(err instanceof Error ? err.message : 'Failed to stop recording');
+      setIsRecording(false); // Ensure recording state is reset even on error
     }
   };
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, '0')``}:${secs.toString().padStart(2, '0')}`;
   };
+
+  if (!recordingService) {
+    return <div>Loading recording service...</div>;
+  }
 
   return (
     <div className="recording-controls">
-      <div className="options">
-        <label>
-          <input
-            type="checkbox"
-            checked={options.audio}
-            onChange={(e) => setOptions({ ...options, audio: e.target.checked })}
-          />
-          Record Audio
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={options.video}
-            onChange={(e) => setOptions({ ...options, video: e.target.checked })}
-          />
-          Record Video
-        </label>
-        <select
-          value={options.quality}
-          onChange={(e) => setOptions({ ...options, quality: e.target.value as any })}
-        >
-          <option value="high">High Quality</option>
-          <option value="medium">Medium Quality</option>
-          <option value="low">Low Quality</option>
-        </select>
-      </div>
-
-      <div className="controls">
-        {!recordingState.isRecording ? (
-          <button onClick={handleStartRecording} className="start-btn">
-            Start Recording
-          </button>
-        ) : (
-          <button onClick={handleStopRecording} className="stop-btn">
-            Stop Recording
-          </button>
-        )}
-      </div>
-
-      {recordingState.isRecording && (
-        <div className="recording-info">
-          <span className="duration">{formatDuration(recordingState.duration)}</span>
-          <span className="recording-indicator">● Recording</span>
-        </div>
-      )}
-
-      {recordingState.error && (
-        <div className="error-message">
-          Error: {recordingState.error}
+      {error && <div className="error">{error}</div>}
+      <div className="duration">{formatDuration(duration)}</div>
+      <button 
+        onClick={isRecording ? handleStopRecording : handleStartRecording}
+        className={isRecording ? 'stop' : 'start'}
+      >
+        {isRecording ? 'Stop Recording' : 'Start Recording'}
+      </button>
+      {recordingPath && (
+        <div className="recording-path">
+          Recording saved to: {recordingPath}
         </div>
       )}
     </div>

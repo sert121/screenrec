@@ -1,36 +1,32 @@
 export interface RecordingOptions {
+    fps: number;
+    output_path: string;
     audio: boolean;
     video: boolean;
-    frameRate: number;
-    quality: 'high' | 'medium' | 'low';
-    region?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-  }
-  
-  export interface RecordingState {
+    frame_rate: number;
+    quality: string;
+}
+
+export interface RecordingState {
     isRecording: boolean;
     duration: number;
-    filePath?: string;
+    outputPath?: string;
     error?: string;
-  }
-  
-  export interface RecordingService {
+}
+
+export interface RecordingService {
     startRecording(options: RecordingOptions): Promise<void>;
     stopRecording(): Promise<string>;
     pauseRecording(): Promise<void>;
     resumeRecording(): Promise<void>;
     getState(): RecordingState;
-  }
-  
-  export type Platform = 'windows' | 'mac';
-  
-  export interface RecordingStats {
+}
+
+export type Platform = 'windows' | 'mac';
+
+export interface RecordingStats {
     fps: number;
     bitrate: number;
     fileSize: number;
     duration: number;
-  } 
+} 

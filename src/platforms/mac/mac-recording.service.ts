@@ -11,15 +11,25 @@ export class MacRecordingService extends BaseRecordingService {
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const dataDir = await appDataDir();
+      console.log('App data directory:', dataDir);
+      
       this.outputPath = await join(dataDir, `recording-${timestamp}.mp4`);
+      console.log('Output path:', this.outputPath);
 
       const args = this.buildScreencaptureArgs(options);
-      this.command = new Command('screencapture', args);
+      console.log('Screencapture arguments:', args);
       
+      this.command = new Command('screencapture', args);
+      console.log('Created screencapture command');
+      
+      console.log('Executing screencapture command...');
       await this.command.execute();
+      console.log('Screencapture command executed successfully');
+      
       this.state.isRecording = true;
       this.startDurationTimer();
     } catch (error) {
+      console.error('Failed to start recording:', error);
       this.state.error = error instanceof Error ? error.message : 'Failed to start recording';
       throw error;
     }
@@ -27,15 +37,22 @@ export class MacRecordingService extends BaseRecordingService {
 
   async stopRecording(): Promise<string> {
     if (!this.command) {
+      console.error('No recording command found');
       throw new Error('No recording in progress');
     }
 
     try {
+      console.log('Attempting to kill screencapture process...');
       await this.command.kill();
+      console.log('Screencapture process killed successfully');
+      
       this.state.isRecording = false;
       this.stopDurationTimer();
+      
+      console.log('Returning output path:', this.outputPath);
       return this.outputPath;
     } catch (error) {
+      console.error('Failed to stop recording:', error);
       this.state.error = error instanceof Error ? error.message : 'Failed to stop recording';
       throw error;
     }

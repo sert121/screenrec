@@ -1,51 +1,49 @@
-use rdev::{listen, Event};
-use std::fs::File;
+use std::env;
+use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use rdev::{listen, Event, EventType};
 
 fn main() {
-    // Get the output file path from command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <output_file>", args[0]);
-        std::process::exit(1);
+    // first arg is the output path
+    let path = env::args().nth(1)
+        .expect("Usage: event_capture <events.log path>");
+    let out_path = PathBuf::from(path);
+
+    // create parent dir
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
     }
-    
-    let output_file = &args[1];
-    println!("Event capture started, writing to: {}", output_file);
-    
-    // Create or open the output file
-    let mut file = match File::create(output_file) {
-        Ok(file) => file,
-        Err(e) => {
-            eprintln!("Failed to create output file: {}", e);
-            std::process::exit(1);
-        }
-    };
-    
-    // Define the callback function for all events
-    let callback = move |event: Event| {
-        // Format the event as a string
-        let event_str = format!("{:?}", event);
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .open(&out_path)
+        .unwrap();
+
+    let running = Arc::new(AtomicBool::new(true));
+    let alive = running.clone();
+
+    ctrlc::set_handler(move || {
+        alive.store(false, Ordering::Relaxed);
+    }).unwrap();
+
+    // run on main thread with CFRunLoop properly set up
+    let _ = listen(move |ev: Event| {
+        if !running.load(Ordering::Relaxed) { return; }
         
-        // Write the event to the file
-        if let Err(e) = writeln!(file, "{}", event_str) {
-            eprintln!("Failed to write event to file: {}", e);
-        }
-        
-        // Flush the file to ensure the event is written immediately
-        if let Err(e) = file.flush() {
-            eprintln!("Failed to flush file: {}", e);
-        }
-    };
-    
-    // Start listening for all events
-    println!("Starting rdev::listen...");
-    if let Err(error) = listen(callback) {
-        eprintln!("Error: {:?}", error);
-        std::process::exit(1);
-    }
-    
-    // This will never be reached because listen blocks
-    println!("Event capture stopped");
-} 
+        let desc = match ev.event_type {
+            EventType::KeyPress(k) => format!("KeyPress {k:?}"),
+            EventType::KeyRelease(k) => format!("KeyRelease {k:?}"),
+            EventType::ButtonPress(b) => format!("MouseDown {b:?}"),
+            EventType::ButtonRelease(b) => format!("MouseUp {b:?}"),
+            EventType::MouseMove { x, y } => format!("MouseMove {x:.0},{y:.0}"),
+            EventType::Wheel { delta_x, delta_y } => format!("Wheel {delta_x},{delta_y}"),
+        };
+
+        let _ = writeln!(file, "{:?}: {}", ev.time, desc);
+    });
+}

@@ -29,3 +29,8 @@ rdev = { version = "0.5.3", features = ["unstable_grab"] }
 chrono = "0.4"
 image = "0.24"
 crossbeam-channel = "0.5"
+ctrlc = "3.4"
+
+[[example]]
+name = "event_capture"
+path = "examples/event_capture.rs"

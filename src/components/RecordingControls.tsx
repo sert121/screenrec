@@ -100,13 +100,8 @@ export const RecordingControls: React.FC = () => {
       setIsRecording(false);
       setRecordingPath(path);
       
-      // Clear recording state after saving
+      // Clear recording state
       setDuration(0);
-      
-      // Reset recording service to get a fresh state
-      const platform = await invoke('get_platform');
-      const newService = RecordingFactory.createRecordingService(platform as string);
-      setRecordingService(newService);
     } catch (err) {
       console.error('Failed to stop recording:', err);
       setError(err instanceof Error ? err.message : 'Failed to stop recording');
@@ -134,11 +129,14 @@ export const RecordingControls: React.FC = () => {
       >
         {isRecording ? 'Stop Recording' : 'Start Recording'}
       </button>
-      {recordingPath && (
-        <div className="recording-path">
-          Recording saved to: {recordingPath}
+      {/* {recordingPath && (
+        <div className="recording-path" title={`Recording saved to: ${recordingPath}`}>
+          Recording saved ✓
+          <div className="recording-path-popover">
+            Path: {recordingPath}
+          </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 }; 

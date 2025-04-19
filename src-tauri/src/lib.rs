@@ -69,7 +69,13 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
     }
 
     // create session directory
-    let session = PathBuf::from(std::env::var("HOME").unwrap_or(".".into()))
+    // let session = PathBuf::from(std::env::var("HOME").unwrap_or(".".into()))
+    //     .join("recordings")
+    //     .join(Local::now().format("%Y%m%d_%H%M%S").to_string());
+    let home_dir = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    let session = PathBuf::from(home_dir)
         .join("recordings")
         .join(Local::now().format("%Y%m%d_%H%M%S").to_string());
     std::fs::create_dir_all(&session).map_err(|e| e.to_string())?;

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "tauri-app-ace",
   "version": "0.1.0",
   "identifier": "com.tauri-app.app",
   "build": {
@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-app",
-        "width": 800,
-        "height": 600
+        "title": "screen-recorder-tauri",
+        "width": 380,
+        "height": 150,
+        "transparent": false,
+        "decorations": true,
+        "backgroundColor": "#000000"  
       }
     ],
     "security": {

@@ -10,6 +10,7 @@ export interface RecordingState {
     is_recording: boolean;
     duration: number;
     error?: string;
+    output_path?: string;
 }
 
 export interface RecordingService {

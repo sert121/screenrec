@@ -127,23 +127,41 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
     let alive = state.is_recording.clone();
     alive.store(true, Ordering::Relaxed);
 
-    thread::spawn(move || for buf in rx {
-        let _ = ff_stdin.write_all(&buf);
+    // FFmpeg input thread
+    let ffmpeg_alive = alive.clone();
+    thread::spawn(move || {
+        // Process all frames in the channel, even after stop signal
+        while let Ok(buf) = rx.recv() {
+            if ff_stdin.write_all(&buf).is_err() {
+                break;
+            }
+        }
+        // Ensure stdin is properly closed when we're done
+        drop(ff_stdin);
     });
 
+    // Frame capture thread
+    let capture_alive = alive.clone();
     thread::spawn(move || {
         let dt = Duration::from_secs_f64(1.0 / opts.fps as f64);
         let mut next = Instant::now();
-        if let Frame::BGRA(f) = first { let _ = tx.try_send(f.data); }
-        while alive.load(Ordering::Relaxed) {
+        if let Frame::BGRA(f) = first { 
+            if tx.send(f.data).is_err() {
+                return;
+            }
+        }
+        while capture_alive.load(Ordering::Relaxed) {
             if let Ok(Frame::BGRA(f)) = capturer.get_next_frame() {
-                let _ = tx.try_send(f.data);
+                if tx.send(f.data).is_err() {
+                    break;
+                }
             }
             if let Some(rem) = next.checked_duration_since(Instant::now()) {
                 thread::sleep(rem);
             }
             next += dt;
         }
+        // Channel will be closed when tx is dropped
     });
 
     *state.started_at.lock().unwrap() = Some(Instant::now());
@@ -152,12 +170,15 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
 
 #[tauri::command]
 fn stop_recording(state: State<AppState>) -> Result<String, String> {
+    // First, signal threads to stop
     state.is_recording.store(false, Ordering::Relaxed);
     
+    // Give time for the pipeline to finish (3 seconds should be enough)
+    std::thread::sleep(std::time::Duration::from_secs(3));
+
     // kill helper and wait for it to exit
     if let Some(mut h) = state.helper.lock().unwrap().take() {
         h.kill().map_err(|e| format!("Failed to kill event capture: {}", e))?;
-        // Wait for the process to actually exit
         match h.wait() {
             Ok(status) => {
                 if !status.success() {
@@ -168,22 +189,37 @@ fn stop_recording(state: State<AppState>) -> Result<String, String> {
         }
     }
 
-    // kill ffmpeg and wait for it to exit
+    // Wait for ffmpeg to finish processing
     if let Some(mut c) = state.ffmpeg.lock().unwrap().take() {
-        c.kill().map_err(|e| format!("Failed to kill ffmpeg: {}", e))?;
-        // Wait for the process to actually exit
         match c.wait() {
             Ok(status) => {
                 if !status.success() {
                     eprintln!("FFmpeg exited with status: {}", status);
                 }
             }
-            Err(e) => eprintln!("Failed to wait for ffmpeg: {}", e),
+            Err(e) => {
+                eprintln!("Failed to wait for ffmpeg: {}", e);
+                // If waiting fails, then kill it
+                let _ = c.kill();
+            }
         }
     }
 
     // return path
     let out = state.output_dir.lock().unwrap().clone().unwrap().join("output.mp4");
+    
+    // Verify the file exists and has size > 0
+    match std::fs::metadata(&out) {
+        Ok(metadata) => {
+            if metadata.len() == 0 {
+                return Err("Recording failed: output file is empty".into());
+            }
+        }
+        Err(e) => {
+            return Err(format!("Recording failed: {}", e));
+        }
+    }
+
     Ok(out.to_string_lossy().into())
 }
 

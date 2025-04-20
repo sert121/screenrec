@@ -60,19 +60,13 @@ The application's core functionality revolves around the RecordingControls compo
 
 1. **Initialization**: On startup, the RecordingControls component invokes the get\_platform command to determine the operating system. It then uses the RecordingFactory to instantiate the appropriate platform-specific recording service (though the provided frontend code seems to directly invoke backend commands rather than using the client-side service implementations).
 
-2. **Starting Recording**: When the "Start Recording" button is clicked, the handleStartRecording function is called. This function invokes the start\_recording Tauri command, passing the desired recording options.
+2. **State Management**: The RecordingControls component maintains state for whether a recording is in progress, the duration, and any errors. It also attempts to get the initial recording state from the backend when the component mounts and when the application window becomes visible.
 
-3. **Stopping Recording**: When the "Stop Recording" button is clicked, the handleStopRecording function is called. This function invokes the stop\_recording Tauri command. The backend is expected to return the path where the recording was saved.
+3. **Core Logic**: The actual recording logic is intended to be handled in the Rust backend, using platform-specific APIs or commands (screencapture on macOS, potentially others on Windows) invoked by the frontend commands. The client-side service files (mac-recording.service.ts, windows-recording.service.ts) seem to be a potential alternative or supplementary approach, but the current RecordingFactory and RecordingControls primarily rely on direct Tauri invoke calls to backend commands.
 
-4. **Duration Display**: A timer is managed in the RecordingControls component to display the elapsed recording time.
+4. **Recording** We handle the frame processing logic in rust in lib.rs. Here we launch a separate process that can ingest the frames to an input pipe provided by ffmpeg, this allows us to not store all the images on disk at the same time. When the recording is stoppped ffmpeg compresses the video for us and saves it in a recording folder (in the home directory). 
 
-5. **State Management**: The RecordingControls component maintains state for whether a recording is in progress, the duration, and any errors. It also attempts to get the initial recording state from the backend when the component mounts and when the application window becomes visible.
-
-6. **Platform-Specific Implementation**: The actual recording logic is intended to be handled in the Rust backend, using platform-specific APIs or commands (screencapture on macOS, potentially others on Windows) invoked by the frontend commands. The client-side service files (mac-recording.service.ts, windows-recording.service.ts) seem to be a potential alternative or supplementary approach, but the current RecordingFactory and RecordingControls primarily rely on direct Tauri invoke calls to backend commands.
-
-7. **Recording** We handle the frame processing logic in rust in lib.rs. Here we launch a separate process that can ingest the frames to an input pipe provided by ffmpeg, this allows us to not store all the images on disk at the same time. When the recording is stoppped ffmpeg compresses the video for us and saves it in a recording folder (in the home directory). 
-
-8. **Keylogging/Event Capturing** To capture the event we run a separate process via cargo, that uses `rdev` to keep track of all the user activities that are being performed on the screen when the user moves around or performs any actions (keypresses, clicks, scrolls etc). The script to track  these events is launched in `lib.rs` and core logic being present in `examples/screen_capture.rs`
+5. **Keylogging/Event Capturing** To capture the event we run a separate process via cargo, that uses `rdev` to keep track of all the user activities that are being performed on the screen when the user moves around or performs any actions (keypresses, clicks, scrolls etc). The script to track  these events is launched in `lib.rs` and core logic being present in `examples/screen_capture.rs`
 
 
 ## **Development and Building**

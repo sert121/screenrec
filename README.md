@@ -1,14 +1,8 @@
 # **ace screenrecord**
 
-This project is a screen recording application built using the Tauri framework, with a frontend developed in React(TS)
+screen recorder for mac/windows
 
-
-## **Project Structure and File Descriptions**
-
-This section details the purpose of each file and directory within the project.
-
-
-
+## File directories:
 ### **src/**
 
 This directory contains the source code for the React frontend application.

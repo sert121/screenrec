@@ -73,7 +73,7 @@ export const RecordingControls: React.FC = () => {
     try {
       setError(null);
       const options: RecordingOptions = {
-        fps: 30,
+        fps: 19,
         show_cursor: true,
         show_highlight: true,
         save_frames: true,

@@ -57,7 +57,7 @@ struct AppState {
 // -----------------------------------------------------------------------------
 
 #[tauri::command]
-fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(), String> {
+fn start_recording(state: State<AppState>, mut opts: RecordingOptions) -> Result<(), String> {
     if state.is_recording.load(Ordering::Relaxed) {
         return Err("Recording already running".into());
     }
@@ -94,6 +94,26 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
         *state.helper.lock().unwrap() = Some(helper);
     }
 
+    fn measure_max_fps(capturer: &mut Capturer) -> Result<f64, String> {
+        const SAMPLE_FRAMES: usize = 30;
+        let mut times = Vec::new();
+    
+        // warm up
+        capturer.get_next_frame().map_err(|e| e.to_string())?;
+    
+        for _ in 0..SAMPLE_FRAMES {
+            let start = Instant::now();
+            capturer.get_next_frame().map_err(|e| e.to_string())?;
+            let elapsed = start.elapsed().as_secs_f64();
+            times.push(elapsed);
+        }
+    
+        let avg_frame_time = times.iter().sum::<f64>() / times.len() as f64;
+        let fps = 1.0 / avg_frame_time;
+        Ok(fps)
+    }
+    
+
     // initialize capturer
     let mut capturer = Capturer::build(scap::capturer::Options {
         fps: opts.fps,
@@ -104,6 +124,13 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
         ..Default::default()
     }).map_err(|e| e.to_string())?;
     capturer.start_capture();
+    let measured_fps = measure_max_fps(&mut capturer)?;
+    println!("Measured max FPS: {:.2}", measured_fps);
+
+
+        // Force final fps to minimum of measured_fps and 20
+    opts.fps = opts.fps.min(measured_fps.floor() as u32);
+    println!("Final recording FPS set to {}", opts.fps);
 
     // grab first frame for geometry
     let first = capturer.get_next_frame().map_err(|e| e.to_string())?;
@@ -150,22 +177,24 @@ fn start_recording(state: State<AppState>, opts: RecordingOptions) -> Result<(),
     let capture_alive = alive.clone();
     thread::spawn(move || {
         let dt = Duration::from_secs_f64(1.0 / opts.fps as f64);
-        let mut next = Instant::now();
-        if let Frame::BGRA(f) = first { 
-            if tx.send(f.data).is_err() {
-                return;
-            }
-        }
+        let recording_start = Instant::now();
+        let mut frame_idx = 0u32;
+        
         while capture_alive.load(Ordering::Relaxed) {
-            if let Ok(Frame::BGRA(f)) = capturer.get_next_frame() {
-                if tx.send(f.data).is_err() {
-                    break;
+            let expected_time = recording_start + dt * frame_idx;
+        
+            let now = Instant::now();
+            if now >= expected_time {
+                if let Ok(Frame::BGRA(f)) = capturer.get_next_frame() {
+                    if tx.send(f.data).is_err() {
+                        break;
+                    }
                 }
+                frame_idx += 1;
+            } else {
+                let sleep_time = expected_time - now;
+                thread::sleep(sleep_time);
             }
-            if let Some(rem) = next.checked_duration_since(Instant::now()) {
-                thread::sleep(rem);
-            }
-            next += dt;
         }
         // Channel will be closed when tx is dropped
     });
